@@ -7,6 +7,30 @@ import "../styles/Farmer.css";
 import socket from "../socket";
 function Farmers() {
 
+    const createRequestId = () => {
+        if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    };
+
+    // A retry is safe because the backend uses this key to return the
+    // already-created ticket instead of allocating another token.
+    const createTicket = async (farmerId) => {
+        const requestId = createRequestId();
+        let lastError;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                return await api.post("/queue", { farmerId }, {
+                    headers: { "X-Idempotency-Key": requestId },
+                });
+            } catch (error) {
+                lastError = error;
+                if (error.response || attempt === 1) throw error;
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+        }
+        throw lastError;
+    };
+
     const navigate = useNavigate();
 
     const [farmers, setFarmers] = useState([]);
@@ -82,13 +106,7 @@ function Farmers() {
 
             setLoadingId(farmerId);
 
-            const response =
-                await api.post(
-                    "/queue",
-                    {
-                        farmerId,
-                    }
-                );
+            const response = await createTicket(farmerId);
 
             alert(
                 `Token ${response.data.data.tokenNumber}
@@ -203,12 +221,7 @@ Service Date : ${response.data.data.serviceDate}`
 
         for (const farmerId of selectedFarmers) {
 
-            await api.post(
-                "/queue",
-                {
-                    farmerId,
-                }
-            );
+            await createTicket(farmerId);
 
         }
 

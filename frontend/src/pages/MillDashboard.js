@@ -10,6 +10,7 @@ function MillDashboard() {
     const navigate = useNavigate();
 
     const [dashboard, setDashboard] = useState({});
+    const [connection, setConnection] = useState(socket.connected ? "online" : "offline");
 
     const loadDashboard = async () => {
 
@@ -34,27 +35,27 @@ function MillDashboard() {
 
         loadDashboard();
 
-        socket.on("dashboardUpdated", () => {
-
-            console.log("Dashboard Updated");
-
-            loadDashboard();
-
-        });
-
-        socket.on("queueUpdated", () => {
-
-            console.log("Queue Updated");
-
-            loadDashboard();
-
-        });
+        const sync = () => loadDashboard();
+        const onConnect = () => { setConnection("online"); sync(); };
+        const onDisconnect = () => setConnection("offline");
+        const onConnectError = () => setConnection("offline");
+        socket.on("connect", onConnect);
+        socket.on("disconnect", onDisconnect);
+        socket.on("connect_error", onConnectError);
+        socket.on("dashboardUpdated", sync);
+        socket.on("queueUpdated", sync);
+        const poll = setInterval(() => {
+            if (!socket.connected) sync();
+        }, 15000);
 
         return () => {
 
-            socket.off("dashboardUpdated");
-
-            socket.off("queueUpdated");
+            socket.off("connect", onConnect);
+            socket.off("disconnect", onDisconnect);
+            socket.off("connect_error", onConnectError);
+            socket.off("dashboardUpdated", sync);
+            socket.off("queueUpdated", sync);
+            clearInterval(poll);
 
         };
 
@@ -102,6 +103,8 @@ function MillDashboard() {
                     Mill Dashboard
 
                 </h1>
+
+                <p>{connection === "online" ? "Live updates connected" : "Offline — retrying"}</p>
 
                 <div className="dashboard-info">
 

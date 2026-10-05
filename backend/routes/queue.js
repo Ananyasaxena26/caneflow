@@ -20,6 +20,7 @@ router.post(
     try {
 
       const { farmerId } = req.body;
+      const requestId = String(req.get("x-idempotency-key") || "").trim();
 
       if (!farmerId) {
         return res.status(400).json({
@@ -28,41 +29,46 @@ router.post(
         });
       }
 
-      const schedule =
-        await ProcurementSchedule.findOne({
-          $expr: {
-            $lt: ["$allocated", "$capacity"],
-          },
-        }).sort({
-          serviceDate: 1,
-        });
-
-      if (!schedule) {
-        return res.status(400).json({
-          success: false,
-          message: "No available schedule found",
-        });
+      if (requestId) {
+        const existing = await QueueTicket.findOne({ requestId });
+        if (existing) {
+          return res.status(200).json({
+            success: true,
+            message: "Existing ticket returned",
+            data: {
+              tokenNumber: existing.tokenNumber,
+              serviceDate: existing.serviceDate,
+              status: existing.status,
+            },
+          });
+        }
       }
 
-      const lastTicket =
-        await QueueTicket.findOne({
-          serviceDate: schedule.serviceDate,
-        }).sort({
-          tokenNumber: -1,
+      const session = await ProcurementSchedule.startSession();
+      let ticket;
+      try {
+        await session.withTransaction(async () => {
+          // Incrementing the schedule document inside the transaction
+          // serializes concurrent token requests and enforces capacity.
+          const schedule = await ProcurementSchedule.findOneAndUpdate(
+            { $expr: { $lt: ["$allocated", "$capacity"] } },
+            { $inc: { allocated: 1 } },
+            { sort: { serviceDate: 1 }, new: true, session }
+          );
+
+          if (!schedule) throw Object.assign(new Error("No available schedule found"), { code: "NO_CAPACITY" });
+
+          [ticket] = await QueueTicket.create([{
+            // allocated is now the atomically assigned token number.
+            tokenNumber: schedule.allocated,
+            serviceDate: schedule.serviceDate,
+            farmer: farmerId,
+            ...(requestId ? { requestId } : {}),
+          }], { session });
         });
-
-      const nextTokenNumber =
-        lastTicket ? lastTicket.tokenNumber + 1 : 1;
-
-      const ticket =
-        await QueueTicket.create({
-          tokenNumber: nextTokenNumber,
-          serviceDate: schedule.serviceDate,
-          farmer: farmerId,
-        });
-
-      schedule.allocated += 1;
-      await schedule.save();
+      } finally {
+        await session.endSession();
+      }
 
       // ===== Socket.IO =====
       const io = req.app.get("io");
@@ -84,6 +90,13 @@ router.post(
     } catch (error) {
 
       console.error(error);
+
+      if (error.code === "NO_CAPACITY") {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
       res.status(500).json({
         success: false,

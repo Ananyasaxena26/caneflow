@@ -12,6 +12,22 @@ async function createMill() {
 
     try {
 
+        try {
+
+            await User.collection.dropIndex("email_1");
+
+        }
+
+        catch (error) {
+
+            if (error.codeName !== "IndexNotFound" && error.code !== 27) {
+
+                throw error;
+
+            }
+
+        }
+
         const existingMill = await User.findOne({
 
             role: "mill"

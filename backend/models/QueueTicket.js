@@ -18,6 +18,11 @@ const queueTicketSchema = new mongoose.Schema(
       required: true,
     },
 
+    requestId: {
+      type: String,
+      trim: true,
+    },
+
     status: {
       type: String,
       enum: [
@@ -32,6 +37,9 @@ const queueTicketSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+queueTicketSchema.index({ serviceDate: 1, tokenNumber: 1 }, { unique: true });
+queueTicketSchema.index({ requestId: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model(
   "QueueTicket",

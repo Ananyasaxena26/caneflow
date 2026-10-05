@@ -12,6 +12,7 @@ function FarmerDashboard() {
     const [dashboard, setDashboard] = useState(null);
 
     const [loading, setLoading] = useState(true);
+    const [connection, setConnection] = useState(socket.connected ? "online" : "offline");
 
     const loadDashboard = async () => {
 
@@ -44,27 +45,27 @@ function FarmerDashboard() {
 
         loadDashboard();
 
-        socket.on("queueUpdated", () => {
-
-            console.log("Queue Updated");
-
-            loadDashboard();
-
-        });
-
-        socket.on("dashboardUpdated", () => {
-
-            console.log("Dashboard Updated");
-
-            loadDashboard();
-
-        });
+        const sync = () => loadDashboard();
+        const onConnect = () => { setConnection("online"); sync(); };
+        const onDisconnect = () => setConnection("offline");
+        const onConnectError = () => setConnection("offline");
+        socket.on("connect", onConnect);
+        socket.on("disconnect", onDisconnect);
+        socket.on("connect_error", onConnectError);
+        socket.on("queueUpdated", sync);
+        socket.on("dashboardUpdated", sync);
+        const poll = setInterval(() => {
+            if (!socket.connected) sync();
+        }, 15000);
 
         return () => {
 
-            socket.off("queueUpdated");
-
-            socket.off("dashboardUpdated");
+            socket.off("connect", onConnect);
+            socket.off("disconnect", onDisconnect);
+            socket.off("connect_error", onConnectError);
+            socket.off("queueUpdated", sync);
+            socket.off("dashboardUpdated", sync);
+            clearInterval(poll);
 
         };
 
@@ -109,6 +110,8 @@ function FarmerDashboard() {
                     Farmer Dashboard
 
                 </h1>
+
+                <p>{connection === "online" ? "Live updates connected" : "Offline — retrying and using manual refresh"}</p>
 
                 <div className="dashboard-info">
 
